@@ -47,7 +47,16 @@ void audio_renderer_start(unsigned char *compression_type) {
 void audio_renderer_stop() {}
 
 void audio_renderer_render_buffer(unsigned char *data, int *data_len, unsigned short *seqnum, uint64_t *ntp_time) {
-    (void) seqnum; (void) ntp_time;
+    (void) seqnum;
+    static int64_t last_log_ns = 0;
+    int64_t now_ns = bridge_monotonic_ns();
+    if (ntp_time && g_video_arrival_offset_ns != 0 && now_ns - last_log_ns > 5000000000LL) {
+        last_log_ns = now_ns;
+        int64_t audio_offset_ns = now_ns - (int64_t) *ntp_time;
+        /* Positive: audio reaches the TV later than the video it belongs to */
+        __android_log_print(ANDROID_LOG_INFO, "AVSync", "audio_late_ms=%lld",
+                            (long long) ((audio_offset_ns - g_video_arrival_offset_ns) / 1000000));
+    }
     bridge_push_audio_c(data, *data_len, compression);
 }
 

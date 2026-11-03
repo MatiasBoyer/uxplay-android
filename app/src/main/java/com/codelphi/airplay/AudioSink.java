@@ -25,7 +25,10 @@ public class AudioSink {
     private static final byte[] ASC = {(byte) 0xF8, (byte) 0xE8, 0x50, 0x00};
 
     private static final int QUEUE_CAP = 512;              /* AAC 帧上限 ≈ 5.8s，纯防抖 */
-    private static final int PREBUFFER_BYTES = 1920 * 8;   /* 攒 8 帧解码 PCM（≈87ms）后才开始播 */
+    /* Nothing drains a backlog at live playback speed, so skip audio once it trails too far behind */
+    private static final long MAX_BACKLOG_FRAMES = SAMPLE_RATE * 35 / 100;    /* 350ms */
+    private static final long TARGET_BACKLOG_FRAMES = SAMPLE_RATE * 22 / 100; /* 220ms, above the prebuffer */
+    private static final int PREBUFFER_BYTES = 1920 * 16;   /* 16 decoded frames (about 174ms): lines the audio up with the video on this TV */
 
     private final LinkedBlockingQueue<byte[]> queue = new LinkedBlockingQueue<>(QUEUE_CAP);
     private final Object trackLock = new Object();
@@ -35,6 +38,10 @@ public class AudioSink {
     private volatile boolean running;
     private volatile long droppedFrames;
     private volatile long pushedFrames;
+    private long framesWritten;
+    private long skippedBuffers;
+    private boolean catchingUp;
+    private boolean lowLatencyStart;
     private long lastUnderrun;
     private long lastHead;
     private int intervalPeak;              /* 5s 统计窗口内 PCM 峰值(16-bit),区分"静音数据"与"播放异常" */
@@ -66,10 +73,26 @@ public class AudioSink {
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .setBufferSizeInBytes(bufSize)
                     .build();
+            /* By default a track stays silent until its whole buffer (over a second) is full, which
+               delays the audio for the rest of the session. Skipping audio needs this too: a track
+               waiting for a full buffer would never start. */
+            lowLatencyStart = false;
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                try {
+                    track.setStartThresholdInFrames(PREBUFFER_BYTES / (CHANNELS * 2));
+                    lowLatencyStart = true;
+                } catch (Exception e) {
+                    android.util.Log.w("AudioSink", "setStartThresholdInFrames failed", e);
+                }
+            }
             /* 不在此处 play()：等预缓冲攒够再起播 */
             running = true;
             droppedFrames = 0;
             pushedFrames = 0;
+            framesWritten = 0;
+            skippedBuffers = 0;
+            catchingUp = false;
+            lastHead = 0;
             thread = new Thread(this::loop, "audiosink");
             thread.start();
             android.util.Log.i("AudioSink", "启动: trackBuffer=" + bufSize + "B (" + (bufSize / 4 * 1000 / SAMPLE_RATE) + "ms)");
@@ -113,6 +136,7 @@ public class AudioSink {
             if (track != null && track.getPlayState() == AudioTrack.PLAYSTATE_PLAYING) {
                 track.pause();
                 track.flush();
+                framesWritten = 0;
                 track.play();
             }
         }
@@ -152,7 +176,25 @@ public class AudioSink {
                 continue;
             }
             offset += written;
+            synchronized (trackLock) { framesWritten += written / (CHANNELS * 2); }
         }
+    }
+
+    /** Audio written to the track but not played yet, in frames */
+    private long backlogFrames() {
+        synchronized (trackLock) {
+            if (track == null) return 0;
+            long head = track.getPlaybackHeadPosition() & 0xFFFFFFFFL;
+            return Math.max(0, framesWritten - head);
+        }
+    }
+
+    private boolean shouldSkipForLatency() {
+        if (!lowLatencyStart) return false;
+        long backlog = backlogFrames();
+        if (backlog > MAX_BACKLOG_FRAMES) catchingUp = true;
+        else if (backlog <= TARGET_BACKLOG_FRAMES) catchingUp = false;
+        return catchingUp;
     }
 
     private void logStats() {
@@ -169,6 +211,8 @@ public class AudioSink {
                 + " 丢=" + droppedFrames + " underrun=" + u + " (+" + (u - lastUnderrun) + ")"
                 + " 播放头+" + headDelta + "帧/5s(应≈" + (SAMPLE_RATE * 5) + ")"
                 + " 峰值=" + intervalPeak + "/32767"
+                + " 积压=" + (backlogFrames() * 1000 / SAMPLE_RATE) + "ms 跳过=" + skippedBuffers
+                + " 视频队列=" + NativeBridge.getVideoSink().queueSize()
                 + " 尺寸[" + sizeHist + "]");
         intervalPeak = 0;
         lastUnderrun = u;
@@ -226,7 +270,8 @@ public class AudioSink {
                                     android.util.Log.i("AudioSink", "预缓冲完成 " + prebuffered + "B，开始播放");
                                 }
                             }
-                            writePcm(pcmBuf, info.size);
+                            if (shouldSkipForLatency()) skippedBuffers++;
+                            else writePcm(pcmBuf, info.size);
                             got = true;
                             /* 诊断：输出帧尺寸直方图（验证 SBR：5760B=1440采样） */
                             if (sizeHist.indexOf("x" + info.size) < 0 && sizeHist.length() < 80) {

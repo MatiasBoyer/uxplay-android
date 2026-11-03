@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <time.h>
 #include <jni.h>
 #include <android/log.h>
 
@@ -16,6 +17,13 @@ typedef unsigned int guint;   /* UxPlay 渲染器头文件使用了 glib 的 gui
 extern JavaVM *g_vm;
 
 static bool h265 = false;
+_Atomic int64_t g_video_arrival_offset_ns = 0;
+
+int64_t bridge_monotonic_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t) ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
 
 void bridge_push_video_c(unsigned char *data, int len) {
     JNIEnv *env = NULL;
@@ -49,7 +57,8 @@ void video_renderer_stop() {}
 void video_renderer_flush() {}
 
 uint64_t video_renderer_render_buffer(unsigned char *data, int *data_len, int *nal_count, uint64_t *ntp_time) {
-    (void) nal_count; (void) ntp_time;
+    (void) nal_count;
+    if (ntp_time) g_video_arrival_offset_ns = bridge_monotonic_ns() - (int64_t) *ntp_time;
     bridge_push_video_c(data, *data_len);
     return 0;
 }

@@ -208,6 +208,8 @@ public class VideoSink {
         queue.clear();
     }
 
+    public int queueSize() { return queue.size(); }
+
     public synchronized void endSession() {
         stop();
         clearParameterSets();

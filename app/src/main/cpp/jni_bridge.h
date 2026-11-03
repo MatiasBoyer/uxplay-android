@@ -11,6 +11,12 @@ extern jmethodID g_m_push_video;      /* (byte[] nal, int len, boolean h265) */
 extern jmethodID g_m_push_audio;      /* (byte[] frame, int len, byte ct) */
 extern jmethodID g_m_set_volume;      /* (float) */
 
+#include <stdatomic.h>
+#include <stdint.h>
+/* Local arrival time minus sender timestamp of the latest video frame, for the A/V sync log */
+extern _Atomic int64_t g_video_arrival_offset_ns;
+int64_t bridge_monotonic_ns(void);
+
 void bridge_attach_env(JNIEnv **env);  /* AttachCurrentThread（幂等） */
 
 #endif
