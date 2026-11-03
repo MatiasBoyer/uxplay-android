@@ -20,19 +20,48 @@ public class MirrorActivity extends Activity {
     private final Handler uiHandler = new Handler();
     private final NativeBridge.SessionEndListener sessionEndListener = this::endMirroringSession;
     private long lastBack;
+    private static final long WAIT_TIMEOUT_MS = 30000;
+    /** When the waiting screen closes itself; 0 while the countdown is not running */
+    private long waitDeadline;
 
     /* 有帧时隐藏等待层；无帧时按服务状态显示"初始化/等待连接/失败"，只有 conn_destroy 才回到等待界面 */
     private final Runnable uiTick = new Runnable() {
         @Override public void run() {
             if (NativeBridge.videoIdleMs() < 3000) {
                 status.setVisibility(View.GONE);
+                waitDeadline = 0;
             } else {
                 status.setVisibility(View.VISIBLE);
+                String pin = NativeBridge.getPendingPin();
+                if (pin != null) {
+                    status.setTextSize(48);
+                    status.setText(getString(R.string.enter_pin, pin));
+                    waitDeadline = 0;
+                    uiHandler.postDelayed(this, 1000);
+                    return;
+                }
+                status.setTextSize(16);
                 int state = NativeBridge.getServiceState();
                 if (state == NativeBridge.STATE_FAILED) {
                     status.setText(R.string.start_failed);
+                    waitDeadline = 0;
                 } else if (state == NativeBridge.STATE_READY) {
-                    status.setText(R.string.waiting_for_connection);
+                    /* Only with no session: a connected client may send no frames while its screen is still */
+                    if (NativeBridge.videoIdleMs() == Long.MAX_VALUE) {
+                        long now = System.currentTimeMillis();
+                        if (waitDeadline == 0) waitDeadline = now + WAIT_TIMEOUT_MS;
+                        int seconds = (int) ((waitDeadline - now + 999) / 1000);
+                        if (seconds <= 0) {
+                            /* The service keeps running, so clients can still find the TV and reopen this screen */
+                            finish();
+                            return;
+                        }
+                        status.setText(getResources().getQuantityString(
+                                R.plurals.waiting_for_connection_seconds, seconds, seconds));
+                    } else {
+                        waitDeadline = 0;
+                        status.setText(R.string.waiting_for_connection);
+                    }
                 }
                 /* STATE_STARTING：保持"初始化…" */
             }
@@ -120,9 +149,13 @@ public class MirrorActivity extends Activity {
     }
 
     /** 真正断开时才清参数集并显示等待层 */
-    private void endMirroringSession() {
+    private void endMirroringSession(boolean hadVideo) {
         NativeBridge.getVideoSink().endSession();
         runOnUiThread(() -> {
+            if (hadVideo) {
+                finish();
+                return;
+            }
             status.setText(R.string.waiting_for_connection);
             status.setVisibility(View.VISIBLE);
         });

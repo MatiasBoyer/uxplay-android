@@ -50,7 +50,7 @@ public class AirPlayService extends Service implements NativeBridge.Listener {
         /* 开机自启后用户再打开界面时会重复进入：服务已在运行且就绪时不重置状态 */
         boolean fresh = !running;
         running = true;
-        startForeground(NOTIF_ID, notif("AirPlay 接收端运行中"));
+        startForeground(NOTIF_ID, notif("Receptor AirPlay en ejecución"));
         NativeBridge.setListener(this);
         /* 后台服务在会话接入时自动唤起画面（Android 10+ 后台启动 Activity 需 appops 授予悬浮窗权限） */
         NativeBridge.setSessionListener(() -> {
@@ -63,19 +63,26 @@ public class AirPlayService extends Service implements NativeBridge.Listener {
             }
         });
 
+        NativeBridge.setPinListener(() -> {
+            try {
+                Intent ui = new Intent(this, MirrorActivity.class);
+                ui.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                startActivity(ui);
+            } catch (Exception e) {
+                android.util.Log.e("AirPlay", "Could not show the PIN screen", e);
+            }
+        });
+
         String name = intent != null ? intent.getStringExtra("name") : null;
         String mac = intent != null ? intent.getStringExtra("mac") : null;
         /* 名称优先级：文件覆盖（filesDir/airplay_name）> intent extra > 默认 */
         if (name == null) name = readSmallFile("airplay_name");
-        if (name == null) name = "AirPlay-Receiver";
+        if (name == null) name = getString(R.string.receiver_name);
         mac = mac != null ? mac : loadOrMakeMac();
         serviceName = name;
 
         NativeBridge.nativeSetInfo(name, mac, VideoSink.isH265Supported());
         NativeBridge.nativeSetFilesDir(getFilesDir().getAbsolutePath());
-        /* 个别 ROM getExternalFilesDir 返回 null，回退到内部目录避免 NPE */
-        File dumpDir = getExternalFilesDir(null);
-        AudioSink.dumpDir = (dumpDir != null ? dumpDir : getFilesDir()).getAbsolutePath();
         if (fresh || NativeBridge.getServiceState() == NativeBridge.STATE_FAILED) {
             raopState = 0;
             airplayState = 0;
@@ -100,7 +107,7 @@ public class AirPlayService extends Service implements NativeBridge.Listener {
             if (raopState == 0 || airplayState == 0) {
                 android.util.Log.e("AirPlay", "mDNS 注册超时：NsdManager 无响应（网络或 ROM 异常）");
                 NativeBridge.setServiceState(NativeBridge.STATE_FAILED);
-                nm().notify(NOTIF_ID, notif("服务注册超时，请检查网络"));
+                nm().notify(NOTIF_ID, notif("Se agotó el tiempo de registro. Revisá la red."));
             }
         };
         mainHandler.postDelayed(registerTimeout, REGISTER_TIMEOUT_MS);
@@ -114,10 +121,10 @@ public class AirPlayService extends Service implements NativeBridge.Listener {
         if (raopState == 1 && airplayState == 1) {
             NativeBridge.setServiceState(NativeBridge.STATE_READY);
             String n = serviceName;
-            nm().notify(NOTIF_ID, notif("AirPlay 接收就绪" + (n != null ? "（" + n + "）" : "")));
+            nm().notify(NOTIF_ID, notif("Receptor AirPlay listo" + (n != null ? " (" + n + ")" : "")));
         } else {
             NativeBridge.setServiceState(NativeBridge.STATE_FAILED);
-            nm().notify(NOTIF_ID, notif("服务注册失败，请检查网络"));
+            nm().notify(NOTIF_ID, notif("No se pudo registrar el servicio. Revisá la red."));
         }
     }
 
@@ -198,6 +205,7 @@ public class AirPlayService extends Service implements NativeBridge.Listener {
         NativeBridge.nativeStop();
         NativeBridge.setListener(null);
         NativeBridge.setSessionListener(null);
+        NativeBridge.setPinListener(null);
         unregister(raopListener);
         unregister(airplayListener);
         super.onDestroy();
@@ -231,7 +239,7 @@ public class AirPlayService extends Service implements NativeBridge.Listener {
             info.setAttribute("features", VideoSink.isH265Supported() ? "0x527FFFF7,0x41E" : "0x527FFFF7,0x1E");
             info.setAttribute("model", "AppleTV3,2");
             info.setAttribute("flags", "0x4");
-            info.setAttribute("pw", "false");
+            info.setAttribute("pw", "true");
             info.setAttribute("pi", loadOrMakePi());
             info.setAttribute("vn", "65537");
             info.setAttribute("protovers", "1.1");
@@ -247,7 +255,7 @@ public class AirPlayService extends Service implements NativeBridge.Listener {
             info.setAttribute("am", "AppleTV3,2");
             info.setAttribute("md", "0,1,2");
             info.setAttribute("rhd", "5.6.0.0");
-            info.setAttribute("sf", "0x4");
+            info.setAttribute("sf", "0x84");
             info.setAttribute("sr", "44100");
             info.setAttribute("ss", "16");
             info.setAttribute("sv", "false");
@@ -255,7 +263,7 @@ public class AirPlayService extends Service implements NativeBridge.Listener {
             info.setAttribute("txtvers", "1");
             info.setAttribute("vs", "220.68");
             info.setAttribute("vn", "65537");
-            info.setAttribute("pw", "false");
+            info.setAttribute("pw", "true");
         }
         NsdManager.RegistrationListener listener = new NsdManager.RegistrationListener() {
             @Override public void onServiceRegistered(NsdServiceInfo i) {

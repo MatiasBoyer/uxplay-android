@@ -26,7 +26,6 @@ public class AudioSink {
 
     private static final int QUEUE_CAP = 512;              /* AAC 帧上限 ≈ 5.8s，纯防抖 */
     private static final int PREBUFFER_BYTES = 1920 * 8;   /* 攒 8 帧解码 PCM（≈87ms）后才开始播 */
-    private static final int DUMP_CAP = SAMPLE_RATE * 4 * 30; /* 30s，覆盖语音段 */
 
     private final LinkedBlockingQueue<byte[]> queue = new LinkedBlockingQueue<>(QUEUE_CAP);
     private final Object trackLock = new Object();
@@ -40,7 +39,6 @@ public class AudioSink {
     private long lastHead;
     private int intervalPeak;              /* 5s 统计窗口内 PCM 峰值(16-bit),区分"静音数据"与"播放异常" */
     private final StringBuilder sizeHist = new StringBuilder();
-    public static String dumpDir = "/data/local/tmp";
 
     public synchronized boolean isRunning() { return running; }
 
@@ -185,9 +183,6 @@ public class AudioSink {
         long lastStat = 0;
         boolean prebuffering = true;
         int prebuffered = 0;
-        java.io.File dumpFile = new java.io.File(dumpDir, "airplay_pcm.raw");
-        java.io.FileOutputStream dump = null;
-        int dumpLen = 0;
         while (running) {
             try {
                 byte[] frame = (pending != null) ? pending : queue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS);
@@ -233,15 +228,7 @@ public class AudioSink {
                             }
                             writePcm(pcmBuf, info.size);
                             got = true;
-                            /* 诊断：解码 PCM 落盘（30s 覆盖语音段）+ 输出帧尺寸直方图（验证 SBR：5760B=1440采样） */
-                            if (dumpLen < DUMP_CAP) {
-                                try {
-                                    if (dump == null) dump = new java.io.FileOutputStream(dumpFile);
-                                    dump.write(pcmBuf, 0, info.size);
-                                    dumpLen += info.size;
-                                    dump.flush();
-                                } catch (Exception ignored) { }
-                            }
+                            /* 诊断：输出帧尺寸直方图（验证 SBR：5760B=1440采样） */
                             if (sizeHist.indexOf("x" + info.size) < 0 && sizeHist.length() < 80) {
                                 if (sizeHist.length() > 0) sizeHist.append(' ');
                                 sizeHist.append(info.size);
@@ -266,6 +253,5 @@ public class AudioSink {
                 if (running) android.util.Log.e("AudioSink", "解码异常", e);
             }
         }
-        if (dump != null) try { dump.close(); } catch (Exception ignored) { }
     }
 }

@@ -13,7 +13,10 @@ public class NativeBridge {
     public interface SessionListener { void onSessionStart(); }
 
     /** 镜像会话结束（客户端断开连接）时回调，用于清除残留画面回到等待界面 */
-    public interface SessionEndListener { void onSessionEnd(); }
+    public interface SessionEndListener { void onSessionEnd(boolean hadVideo); }
+
+    /** A client must enter a PIN: bring the screen up so it can be read */
+    public interface PinListener { void onPinRequired(); }
 
     /** 前台服务生命周期状态：等待界面据此区分"初始化中 / 已就绪 / 启动失败" */
     public static final int STATE_STARTING = 0;
@@ -29,6 +32,10 @@ public class NativeBridge {
     private static final AudioSink audioSink = new AudioSink();
     private static volatile long lastVideoFrame = 0;
     private static volatile boolean videoH265;
+    private static final long PIN_DISPLAY_MS = 60000;
+    private static volatile PinListener pinListener;
+    private static volatile String pendingPin;
+    private static volatile long pendingPinTime;
 
     public static void setListener(Listener l) { listener = l; }
     public static void setServiceState(int state) { serviceState = state; }
@@ -39,6 +46,23 @@ public class NativeBridge {
         if (sessionEndListener == l) sessionEndListener = null;
     }
     public static void setSurface(Surface s) { surface = s; }
+    public static void setPinListener(PinListener l) { pinListener = l; }
+
+    /** The PIN to show, or null when none was requested in the last minute */
+    public static String getPendingPin() {
+        String pin = pendingPin;
+        if (pin == null || System.currentTimeMillis() - pendingPinTime > PIN_DISPLAY_MS) return null;
+        return pin;
+    }
+
+    public static void cDisplayPin(String pin) {
+        android.util.Log.i("NativeBridge", "PIN requested");
+        pendingPinTime = System.currentTimeMillis();
+        pendingPin = pin;
+        if (pinListener != null) {
+            try { pinListener.onPinRequired(); } catch (Exception ignored) { }
+        }
+    }
 
     // ---- C 回调入口 ----
     public static void cRegisterAirplay(String name, String type, String deviceId, int port, String pk) {
@@ -56,6 +80,7 @@ public class NativeBridge {
 
     public static void cPushVideo(byte[] nal, int len, boolean h265) {
         videoH265 = h265;
+        pendingPin = null;
         boolean wasIdle = lastVideoFrame == 0 || System.currentTimeMillis() - lastVideoFrame > 2000;
         lastVideoFrame = System.currentTimeMillis();
         if (wasIdle && sessionListener != null) {
@@ -68,9 +93,11 @@ public class NativeBridge {
 
     public static void cSessionEnd() {
         android.util.Log.i("NativeBridge", "镜像会话结束");
+        /* Connections also close during the PIN step, before any video has arrived */
+        boolean hadVideo = lastVideoFrame != 0;
         lastVideoFrame = 0;
         if (sessionEndListener != null) {
-            try { sessionEndListener.onSessionEnd(); } catch (Exception ignored) { }
+            try { sessionEndListener.onSessionEnd(hadVideo); } catch (Exception ignored) { }
         }
     }
 

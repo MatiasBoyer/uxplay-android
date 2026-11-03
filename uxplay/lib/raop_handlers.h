@@ -27,7 +27,8 @@
 #define AUDIO_SAMPLE_RATE 44100   /* all supported AirPlay audio format use this sample rate */
 #define SECOND_IN_USECS 1000000
 #define SECOND_IN_NSECS 1000000000
-#define MAX_PW_ATTEMPTS 3
+#include <unistd.h>
+#define MAX_PW_ATTEMPTS 10
 
 typedef void (*raop_handler_t)(raop_conn_t *, http_request_t *,
                                http_response_t *, char **, int *);
@@ -654,6 +655,7 @@ raop_handler_setup(raop_conn_t *conn,
             int len = 0;
             const char *password = raop->callbacks.passwd(raop->callbacks.cls, &len);
             // len = -1 means use a random password for this connection; len = 0 means no password
+            bool pin_is_new = false;
             if (len == -1 && raop->random_pw && raop->auth_fail_count >= MAX_PW_ATTEMPTS) {
                 // change random_pw after MAX_PW_ATTEMPTS  failed authentication attempts
                 logger_log(raop->logger, LOGGER_INFO, "Too many authentication failures: generate new random password");
@@ -676,13 +678,13 @@ raop_handler_setup(raop_conn_t *conn,
                     logger_log(raop->logger, LOGGER_ERR, "Failed to allocate raop->random_pw");
                 }
                 raop->auth_fail_count = 0;
+                pin_is_new = true;
             }
-            if (len == -1 && !authorization && raop->random_pw) {
+            if (len == -1 && (!authorization || pin_is_new) && raop->random_pw) {
                 if (raop->callbacks.display_pin) {
                     raop->callbacks.display_pin(raop->callbacks.cls, raop->random_pw);
                 }
                 logger_log(raop->logger, LOGGER_INFO, "*** CLIENT MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", raop->random_pw);
-                raop->auth_fail_count++;
             }
 	    if (len && !conn->authenticated) {
  	        if (len == -1) {
@@ -697,9 +699,8 @@ raop_handler_setup(raop_conn_t *conn,
                     conn->authenticated = pairing_digest_verify(method, authorization, password);
 		    if (!conn->authenticated) {
                         // if random_pw is used, the auth_fail_count will be the number of times it is displayed after creation
-                        if (len != -1) {
-                            raop->auth_fail_count++;
-                        }
+                        raop->auth_fail_count++;
+                        sleep(1);   /* slow down PIN guessing */
                         logger_log(raop->logger, LOGGER_INFO, "*** authentication failure: count = %u", raop->auth_fail_count);
                     }
                     if (conn->authenticated) {
@@ -726,7 +727,9 @@ raop_handler_setup(raop_conn_t *conn,
                     unsigned char nonce[16] = { '\0' };
                     int len = 16;
                     uint64_t now = raop_ntp_get_local_time();
-                    assert (!pairing_session_make_nonce(conn->session, &now, url, nonce, len));
+                    int nonce_ret = pairing_session_make_nonce(conn->session, &now, url, nonce, len);
+                    assert (!nonce_ret);
+                    (void) nonce_ret;
                     if (raop->nonce) {
                         free(raop->nonce);
                     }

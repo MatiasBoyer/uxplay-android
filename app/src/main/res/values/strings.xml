@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">AirPlay 接收</string>
-    <string name="initializing">初始化…</string>
-    <string name="waiting_for_connection">等待 iPhone/Mac 连接…</string>
-    <string name="start_failed">启动失败：请确认电视已联网、与 iPhone 在同一网络，然后重启应用</string>
-    <string name="press_back_again_to_exit">再按一次返回键退出投屏</string>
+    <string name="app_name">Receptor AirPlay</string>
+    <string name="receiver_name">TV Comedor M&amp;N</string>
+    <string name="initializing">Iniciando…</string>
+    <string name="waiting_for_connection">Esperando conexión de iPhone/Mac…</string>
+    <plurals name="waiting_for_connection_seconds">
+        <item quantity="one">Esperando conexión de iPhone/Mac por %d segundo</item>
+        <item quantity="other">Esperando conexión de iPhone/Mac por %d segundos</item>
+    </plurals>
+    <string name="start_failed">No se pudo iniciar. Revisá que la TV tenga internet y esté en la misma red que el iPhone, y volvé a abrir la app.</string>
+    <string name="press_back_again_to_exit">Presioná Atrás otra vez para salir</string>
+    <string name="enter_pin">Ingresá este PIN en tu iPhone o Mac:\n\n%1$s</string>
 </resources>

@@ -30,6 +30,7 @@ jmethodID g_m_push_audio = NULL;
 jmethodID g_m_set_volume = NULL;
 jmethodID g_m_session_end = NULL;
 jmethodID g_m_audio_flush = NULL;
+static jmethodID g_m_display_pin = NULL;
 
 static raop_t *raop = NULL;
 static pthread_t uxplay_thread;
@@ -42,7 +43,7 @@ static unsigned short raop_port = 0, airplay_port = 0;
 static unsigned char last_ct = 3;
 static char g_mac[32] = "00:00:00:00:00:00";
 static unsigned char g_hw_addr[6] = {0};
-static char g_name[128] = "AirPlay-Receiver";
+static char g_name[128] = "TV Comedor M&N";
 static char g_filesdir[256] = "/data/local/tmp";
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "AirPlay", __VA_ARGS__)
@@ -144,10 +145,22 @@ static void report_client_request(void *cls, char *deviceid, char *model, char *
     (void) cls; (void) deviceid; (void) model; (void) name;
     if (admit) *admit = true;   /* 接受所有客户端 */
 }
-static void display_pin(void *cls, char *pin) { (void) cls; (void) pin; }
+static void display_pin(void *cls, char *pin) {
+    (void) cls;
+    JNIEnv *env = NULL;
+    bridge_attach_env(&env);
+    if (!env || !g_bridge_cls || !g_m_display_pin || !pin) return;
+    jstring jpin = (*env)->NewStringUTF(env, pin);
+    if (jpin) {
+        (*env)->CallStaticVoidMethod(env, g_bridge_cls, g_m_display_pin, jpin);
+        (*env)->DeleteLocalRef(env, jpin);
+    }
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+}
 static void register_client(void *cls, const char *d, const char *p, const char *n) { (void) cls; (void) d; (void) p; (void) n; }
 static bool check_register(void *cls, const char *pk) { (void) cls; (void) pk; return true; }
-static const char *passwd(void *cls, int *len) { (void) cls; if (len) *len = 0; return NULL; }
+/* len = -1: UxPlay generates a random 4-digit PIN and shows it through display_pin */
+static const char *passwd(void *cls, int *len) { (void) cls; if (len) *len = -1; return NULL; }
 static void export_dacp(void *cls, const char *ar, const char *di) { (void) cls; (void) ar; (void) di; }
 static int video_set_codec(void *cls, video_codec_t codec) {
     (void) cls;
@@ -249,7 +262,7 @@ static void *uxplay_thread_fn(void *arg) {
     airplay_port = raop_port;
 
     int err = 0;
-    discovery = dnssd_init(g_name, strlen(g_name), (const char *) g_hw_addr, sizeof(g_hw_addr), &err, 0);
+    discovery = dnssd_init(g_name, strlen(g_name), (const char *) g_hw_addr, sizeof(g_hw_addr), &err, 3);
     if (!discovery) { LOGE("dnssd_init 失败: %d", err); goto cleanup; }
     /* 镜像特性位（照抄 uxplay 默认） */
     dnssd_set_airplay_features(discovery, 1, 1);
@@ -301,7 +314,8 @@ JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
     g_m_set_volume = (*env)->GetStaticMethodID(env, cls, "cSetVolume", "(F)V");
     g_m_session_end = (*env)->GetStaticMethodID(env, cls, "cSessionEnd", "()V");
     g_m_audio_flush = (*env)->GetStaticMethodID(env, cls, "cAudioFlush", "()V");
-    if (!g_m_register_raop || !g_m_register_airplay || !g_m_push_video || !g_m_push_audio || !g_m_set_volume || !g_m_session_end || !g_m_audio_flush)
+    g_m_display_pin = (*env)->GetStaticMethodID(env, cls, "cDisplayPin", "(Ljava/lang/String;)V");
+    if (!g_m_register_raop || !g_m_register_airplay || !g_m_push_video || !g_m_push_audio || !g_m_set_volume || !g_m_session_end || !g_m_audio_flush || !g_m_display_pin)
         return JNI_ERR;
     return JNI_VERSION_1_6;
 }
