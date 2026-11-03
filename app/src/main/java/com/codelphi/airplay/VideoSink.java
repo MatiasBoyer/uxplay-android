@@ -92,6 +92,9 @@ public class VideoSink {
                 fmt.setByteBuffer("csd-1", ByteBuffer.wrap(ppsNal));
             }
         }
+        /* A new decoder may belong to a new screen, whose surface is still full size: always report its size */
+        lastReportedW = 0;
+        lastReportedH = 0;
         codec = MediaCodec.createDecoderByType(mime);
         codec.configure(fmt, surface, null, 0);
         codec.start();
