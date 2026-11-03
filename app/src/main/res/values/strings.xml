@@ -10,5 +10,5 @@
     </plurals>
     <string name="start_failed">No se pudo iniciar. Revisá que la TV tenga internet y esté en la misma red que el iPhone, y volvé a abrir la app.</string>
     <string name="press_back_again_to_exit">Presioná Atrás otra vez para salir</string>
-    <string name="enter_pin">Ingresá este PIN en tu iPhone o Mac:\n\n%1$s</string>
+    <string name="enter_pin">Ingresá este PIN en tu iPhone o Mac</string>
 </resources>

@@ -17,6 +17,8 @@ public class MirrorActivity extends Activity {
 
     private SurfaceView surfaceView;
     private TextView status;
+    private View pinPanel;
+    private TextView[] pinDigits;
     private final Handler uiHandler = new Handler();
     private final NativeBridge.SessionEndListener sessionEndListener = this::endMirroringSession;
     private long lastBack;
@@ -29,18 +31,22 @@ public class MirrorActivity extends Activity {
         @Override public void run() {
             if (NativeBridge.videoIdleMs() < 3000) {
                 status.setVisibility(View.GONE);
+                pinPanel.setVisibility(View.GONE);
                 waitDeadline = 0;
             } else {
-                status.setVisibility(View.VISIBLE);
                 String pin = NativeBridge.getPendingPin();
                 if (pin != null) {
-                    status.setTextSize(48);
-                    status.setText(getString(R.string.enter_pin, pin));
+                    status.setVisibility(View.GONE);
+                    pinPanel.setVisibility(View.VISIBLE);
+                    for (int i = 0; i < pinDigits.length; i++) {
+                        pinDigits[i].setText(i < pin.length() ? pin.substring(i, i + 1) : "");
+                    }
                     waitDeadline = 0;
                     uiHandler.postDelayed(this, 1000);
                     return;
                 }
-                status.setTextSize(16);
+                pinPanel.setVisibility(View.GONE);
+                status.setVisibility(View.VISIBLE);
                 int state = NativeBridge.getServiceState();
                 if (state == NativeBridge.STATE_FAILED) {
                     status.setText(R.string.start_failed);
@@ -77,6 +83,10 @@ public class MirrorActivity extends Activity {
 
         surfaceView = findViewById(R.id.surface);
         status = findViewById(R.id.status);
+        pinPanel = findViewById(R.id.pin_panel);
+        pinDigits = new TextView[] {
+                findViewById(R.id.pin_digit_1), findViewById(R.id.pin_digit_2),
+                findViewById(R.id.pin_digit_3), findViewById(R.id.pin_digit_4)};
 
         NativeBridge.setSessionEndListener(sessionEndListener);
         /* 解码器报出真实分辨率后按比例重排 SurfaceView：保持宽高比居中，多余部分留黑边，绝不拉伸 */
